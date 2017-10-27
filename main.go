@@ -19,8 +19,8 @@ func main(){
 	go transform(extractChannel,transformChannel)
 	go load(transformChannel, doneChannel)
 
-	<- doneChannel
 	fmt.Println(time.Since(start))
+	<- doneChannel
 }
 
 type Product struct {
