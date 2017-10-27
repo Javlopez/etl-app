@@ -10,8 +10,17 @@ import(
 
 func main(){
 	start := time.Now()
-	orders := extract()
-	orders = transform(orders)
+
+	extractChannel := make(chan *Order)
+	transformChannel := make(chan *Order)
+	doneChannel := make(chan bool)
+
+	go extract(extractChannel)
+	go transform(extractChannel,transformChannel)
+	go load(transformChannel, doneChannel)
+
+	<- doneChannel
+	fmt.Println(time.Since(start))
 }
 
 type Product struct {
@@ -29,9 +38,8 @@ type Order struct {
 	UnitPrice float64
 }
 
-func extract() []*Order{
+func extract(ch chan *Order){
 
-	result := []*Order{}
 
 	f, _ := os.Open("./orders.txt")
 	defer f.Close()
@@ -44,14 +52,14 @@ func extract() []*Order{
 		order.PartNumber = record[1]
 		order.Quantity, _ = strconv.Atoi(record[2])
 
-		result = append(result, order)
+		ch <- order
 	}
 
-	return result
+	close(ch)
 }
 
 
-func transform(orders []*Order) []*Order {
+func transform(extractChannel, transformChannel chan *Order) {
 
 	f, _ := os.Open("./productList.txt")
 	defer f.Close()
@@ -71,30 +79,35 @@ func transform(orders []*Order) []*Order {
 	}
 
 
-	for idx,  _ := range orders {
+	for o := range extractChannel {
 		time.Sleep(3 * time.Millisecond)
-		o := orders[idx]
 		o.UnitCost = productList[o.PartNumber].UnitCost
 		o.UnitPrice = productList[o.PartNumber].UnitPrice
+
+		transformChannel <- o
 	}
 
-	return orders
+	close(transformChannel)
 }
 
-func load(orders []*Order) {
+func load(transformChannel chan *Order, doneChannel chan bool) {
 
 	f, _ := os.Create("./dest.txt")
 	defer f.Close()
 
 	fmt.Fprintf(f, "%20s%15s%12s%12s%15s%15s\n",
-		"Part Number", "Quantity", "Unit Cost",
-		"Unit Price", "Total Cost", "Total Price")
+		"Part Number", "Quantity",
+		"Unit Cost", "Unit Price",
+		"Total Cost", "Total Price")
 
-	for _, o := range orders  {
+	for  o := range transformChannel{
 		time.Sleep(1 * time.Millisecond)
-		fmt.Fprintf(f,"%20s%15s%12s%12s%15s%15s\n",
-			o.PartNumber, o.Quantity, o.UnitCost, o.UnitPrice,
-			o.UnitCost * float64(o.Quantity),
-			o.UnitPrice * float64(o.Quantity))
+		fmt.Fprintf(f, "%20s %15d %12.2f %12.2f %15.2f %15.2f\n",
+			o.PartNumber, o.Quantity,
+			o.UnitCost, o.UnitPrice,
+			o.UnitCost*float64(o.Quantity),
+			o.UnitPrice*float64(o.Quantity))
 	}
+
+	doneChannel <- true
 }
